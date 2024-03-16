@@ -1,7 +1,3 @@
----
-- name: Bringing-Old-Photos-Back-to-Life
-  hosts: all
-  gather_facts: no
 
 # Succesfully tested on Ubuntu 18.04\20.04 and Debian 10 
 
