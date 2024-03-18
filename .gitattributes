@@ -1,3 +1,0 @@
-global/global_checkpoints filter=lfs diff=lfs merge=lfs -text
-global/global_checkpoints.zip filter=lfs diff=lfs merge=lfs -text
-Global/global_checkpoints.zip filter=lfs diff=lfs merge=lfs -text
