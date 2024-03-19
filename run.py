@@ -1,8 +1,8 @@
-
 import os
 import argparse
 import shutil
 import sys
+import warnings
 from subprocess import call
 
 def run_cmd(command):
@@ -12,35 +12,7 @@ def run_cmd(command):
         print("Process interrupted")
         sys.exit(1)
 
-if __name__ == "__main__":
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--input_folder", type=str, default="./test_images/old", help="Test images")
-    parser.add_argument(
-        "--output_folder",
-        type=str,
-        default="./output",
-        help="Restored images, please use the absolute path",
-    )
-    parser.add_argument("--GPU", type=str, default="6,7", help="0,1,2")
-    parser.add_argument(
-        "--checkpoint_name", type=str, default="Setting_9_epoch_100", help="choose which checkpoint"
-    )
-    parser.add_argument("--with_scratch", action="store_true")
-    parser.add_argument("--HR", action='store_true')
-    opts = parser.parse_args()
-
-    gpu1 = opts.GPU
-
-    # resolve relative paths before changing directory
-    opts.input_folder = os.path.abspath(opts.input_folder)
-    opts.output_folder = os.path.abspath(opts.output_folder)
-    if not os.path.exists(opts.output_folder):
-        os.makedirs(opts.output_folder)
-
-    main_environment = os.getcwd()
-
-    ## Stage 1: Overall Quality Improve
+def stage_1_overall_restoration(opts):
     print("Running Stage 1: Overall restoration")
     os.chdir("./Global")
     stage_1_input_dir = opts.input_folder
@@ -55,11 +27,10 @@ if __name__ == "__main__":
             + " --outputs_dir "
             + stage_1_output_dir
             + " --gpu_ids "
-            + gpu1
+            + opts.GPU
         )
         run_cmd(stage_1_command)
     else:
-
         mask_dir = os.path.join(stage_1_output_dir, "masks")
         new_input = os.path.join(mask_dir, "input")
         new_mask = os.path.join(mask_dir, "mask")
@@ -70,7 +41,7 @@ if __name__ == "__main__":
             + mask_dir
             + " --input_size full_size"
             + " --GPU "
-            + gpu1
+            + opts.GPU
         )
 
         if opts.HR:
@@ -86,13 +57,12 @@ if __name__ == "__main__":
             + " --outputs_dir "
             + stage_1_output_dir
             + " --gpu_ids "
-            + gpu1 + HR_suffix
+            + opts.GPU + HR_suffix
         )
 
         run_cmd(stage_1_command_1)
         run_cmd(stage_1_command_2)
 
-    ## Solve the case when there is no face in the old photo
     stage_1_results = os.path.join(stage_1_output_dir, "restored_image")
     stage_4_output_dir = os.path.join(opts.output_folder, "final_output")
     if not os.path.exists(stage_4_output_dir):
@@ -104,8 +74,7 @@ if __name__ == "__main__":
     print("Finish Stage 1 ...")
     print("\n")
 
-    ## Stage 2: Face Detection
-
+def stage_2_face_detection(opts, stage_1_output_dir):
     print("Running Stage 2: Face Detection")
     os.chdir(".././Face_Detection")
     stage_2_input_dir = os.path.join(stage_1_output_dir, "restored_image")
@@ -124,7 +93,7 @@ if __name__ == "__main__":
     print("Finish Stage 2 ...")
     print("\n")
 
-    ## Stage 3: Face Restore
+def stage_3_face_enhancement(opts, stage_2_output_dir):
     print("Running Stage 3: Face Enhancement")
     os.chdir(".././Face_Enhancement")
     stage_3_input_mask = "./"
@@ -143,7 +112,7 @@ if __name__ == "__main__":
             + " --tensorboard_log --name "
             + opts.checkpoint_name
             + " --gpu_ids "
-            + gpu1
+            + opts.GPU
             + " --load_size 512 --label_nc 18 --no_instance --preprocess_mode resize --batchSize 1 --results_dir "
             + stage_3_output_dir
             + " --no_parsing_map"
@@ -157,7 +126,7 @@ if __name__ == "__main__":
             + " --tensorboard_log --name "
             + opts.checkpoint_name
             + " --gpu_ids "
-            + gpu1
+            + opts.GPU
             + " --load_size 256 --label_nc 18 --no_instance --preprocess_mode resize --batchSize 4 --results_dir "
             + stage_3_output_dir
             + " --no_parsing_map"
@@ -166,12 +135,12 @@ if __name__ == "__main__":
     print("Finish Stage 3 ...")
     print("\n")
 
-    ## Stage 4: Warp back
+def stage_4_blending(opts, stage_1_output_dir, stage_3_output_dir):
     print("Running Stage 4: Blending")
     os.chdir(".././Face_Detection")
     stage_4_input_image_dir = os.path.join(stage_1_output_dir, "restored_image")
     stage_4_input_face_dir = os.path.join(stage_3_output_dir, "each_img")
-    stage_4_output_dir = os.path.join(opts.output_folder, "final_output")
+    stage_4_output_dir = os.path.join(opts.output_folder, "after_blending")
     if not os.path.exists(stage_4_output_dir):
         os.makedirs(stage_4_output_dir)
     if opts.HR:
@@ -196,5 +165,57 @@ if __name__ == "__main__":
     print("Finish Stage 4 ...")
     print("\n")
 
-    print("All the processing is done. Please check the results.")
+def stage_5(opts):
+    print("Running Stage 5: image super resolution")
+    real_esrgan_dir = ".././Real-ESRGAN"
+    input_dir = os.path.join(opts.output_folder, "after_blending")
+    output_dir = os.path.join(opts.output_folder, "final_output")
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    os.chdir(real_esrgan_dir)
+    command = (
+        f"python inference_realesrgan.py -n RealESRGAN_x4plus -i {input_dir} -o {output_dir} --face_enhance"
+    )
+    run_cmd(command)
+    print("Finish Stage 5: Real-ESRGAN")
+    print("\n")
 
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input_folder", type=str, default="./test_images/old", help="Test images")
+    parser.add_argument(
+        "--output_folder",
+        type=str,
+        default="./output",
+        help="Restored images, please use the absolute path",
+    )
+    parser.add_argument("--GPU", type=str, default="6,7", help="0,1,2")
+    parser.add_argument(
+        "--checkpoint_name", type=str, default="Setting_9_epoch_100", help="choose which checkpoint"
+    )
+    parser.add_argument("--with_scratch", action="store_true")
+    parser.add_argument("--HR", action='store_true')
+    opts = parser.parse_args()
+
+    # resolve relative paths before changing directory
+    opts.input_folder = os.path.abspath(opts.input_folder)
+    opts.output_folder = os.path.abspath(opts.output_folder)
+    if not os.path.exists(opts.output_folder):
+        os.makedirs(opts.output_folder)
+
+    main_environment = os.getcwd()
+
+    stage_1_overall_restoration(opts)
+
+    stage_1_output_dir = os.path.join(opts.output_folder, "stage_1_restore_output")
+    stage_2_face_detection(opts, stage_1_output_dir)
+
+    stage_2_output_dir = os.path.join(opts.output_folder, "stage_2_detection_output")
+    stage_3_face_enhancement(opts, stage_2_output_dir)
+
+    stage_3_output_dir = os.path.join(opts.output_folder, "stage_3_face_output")
+    stage_4_blending(opts, stage_1_output_dir, stage_3_output_dir)
+    warnings.filterwarnings("ignore", category=UserWarning)
+    stage_5(opts)
+
+    print("All the processing is done. Please check the results.")
